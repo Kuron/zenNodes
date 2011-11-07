@@ -1,11 +1,9 @@
 
 A Javascript implementation of Zen Coding that generates DOM nodes.
 
-A few weeks back, I wanted to quickly generate a DOM structure based on a compact string as a template for my views rather than storing them in script tags, but I wasn't able to get a hold on how I wanted to do it at the time. More recently, I remembered about reading Zen Coding awhile ago and saw that there isn't a Javascript implementation of it, so I started this project. This project also helped me get into the mindset of writing (my first) parsers as well, so it was a nice learning experience.
+A few weeks back, I wanted to quickly generate a DOM structure based on a compact string as a template for my views rather than storing them in script tags, but I wasn't able to get a hold on how I wanted to do it at the time. More recently, I remembered about reading Zen Coding awhile ago and saw that there isn't a Javascript implementation of it, so I started this project.
 
-Notes
-* I added a backreference (like regex) for groups, but its very limited in where it can be used
-* I haven't tested zenNodes extensively yet, so there may still be some obvious problems or some differences from Zen Coding at the moment
+This project has helped me get into the mindset of writing my first parser as well, so it was a good learning experience.
 
-Design credits goes to Zen Coding author(s).
+Credits goes to Zen Coding author(s) for the original design.
 http://code.google.com/p/zen-coding/
