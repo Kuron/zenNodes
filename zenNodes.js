@@ -1,5 +1,5 @@
 /**
- * zenNodes v0.2.0
+ * zenNodes v0.3.0
  * A Javascript implementation of Zen Coding that generates DOM nodes. 
  * 
  * Copyright (c) 2011 Phuong Phan
@@ -18,15 +18,15 @@ var zenNodes = function (input, parent) {
   var state = zenNodes.analyze(input);
   
   if (state.input.length)
-    zenNodes.error('Syntax error: expecting ' + zenNodes.grammars[state.previous].join(', ') + ' token after ' + (state.tokens.length ? zenNodes.func.lastToken(state.tokens).name : '$start'));
+    zenNodes.error('Syntax error: expecting ' + zenNodes.grammars[state.previous].join(', ') + ' token after ' + (state.tokens.length ? zenNodes.func.getLastToken(state.tokens).name : '$start'));
   if (!zenNodes.func.inList(zenNodes.grammars[state.previous], '$end'))
     zenNodes.error('Syntax error: unterminated ' + state.previous + ' expecting ' + zenNodes.grammars[state.previous].join(', ') + ' token');
   
   delete state.input;
   delete state.previous;
-  zenNodes.parse(state, parent);
   
-  return state.root;
+  state.tokens.push(new zenNodes.obj.Token('$end', undefined, '$end'));
+  return zenNodes.parse(state, parent);
 };
 
 zenNodes.analyze = function (input) {
@@ -58,7 +58,7 @@ zenNodes.error = function (msg) {
 zenNodes.parse = function (state, parent) {
   state.current = null;
   state.data = {};
-  state.multiplier = false;
+  state.multiplier = null;
   state.parent = [];
   state.root = parent || zenNodes.func.fragment();
   state.parent.push(state.root);
@@ -76,6 +76,8 @@ zenNodes.parse = function (state, parent) {
     if (token.name in zenNodes.rules)
       zenNodes.rules[token.name](state.data, token);
   }
+  
+  return state.root;
 };
 
 zenNodes.getNextTokenName = function (input, tokenName) {
@@ -126,7 +128,7 @@ zenNodes.tokens = {
   'sibling'           : { value: 1, pattern: /^(\+)/ },
   'tag'               : { value: 1, pattern: /^([a-z]+)/ },
   'text'              : { value: 1, pattern: /^({)/ },
-  'textContents'      : { value: 1, pattern: /^(.*?(?:[^\\])(?![^}]+))/ },
+  'textContents'      : { value: 1, pattern: /^(.*?(?:[^\\])(?![^}]+))/, type: zenNodes.tokenTypes.TEXT },
   'textEnd'           : { value: 1, pattern: /^(})/ }
 };
 
@@ -148,10 +150,10 @@ zenNodes.grammars = {
   'descendant'        : ['$afterTag', 'group', 'tag'],
   'group'             : ['groupContents'],
   'groupContents'     : ['groupEnd'],
-  'groupEnd'          : ['$end', 'sibling'],
+  'groupEnd'          : ['$end', 'multiplier', 'sibling'],
   'id'                : ['$end', '$afterTag', 'placeholder'],
   'multiplier'        : ['$end', 'descendant', 'sibling'],
-  'placeholder'       : ['multiplier'],
+  'placeholder'       : ['$end', 'descendant', 'multiplier'],
   'sibling'           : ['$afterTag', 'group', 'tag'],
   'tag'               : ['$end', '$afterTag', 'autocomplete'],
   'text'              : ['textContents'],
@@ -214,13 +216,24 @@ zenNodes.rules = {
 };
 
 ///////////////////////////////////////////////////////////////////////
-// Defines how to parse each token. Entities are ignored if a 
-// definition is not defined.
+// Defines how to parse each token. Tokens are ignored if a definition 
+// is not defined.
 
 zenNodes.parser = {
+  '$end': function (state, token, tokenIndex) {
+    if (state.multiplier) {
+      var parent = state.multiplier.nodeType == 11 ? zenNodes.func.getParent(state.parent) : state.multiplier.parentNode,
+        i = 1,
+        size = zenNodes.func.getLastToken(state.tokens, tokenIndex, function (token) { return token.name == 'multiplier'; }).value;
+      for (; i < size; i++)
+        parent.appendChild(state.multiplier.cloneNode(true));
+      zenNodes.parser['multiplier'].replaceAll(parent.childNodes);
+    }
+  },
+  
   'attribute': function (state, token) {
     if (!state.current)
-      state.current = zenNodes.func.lastParent(state.parent).appendChild(document.createElement('div'));
+      state.current = zenNodes.func.getParent(state.parent).appendChild(document.createElement('div'));
   },
   
   'attributeName': function (state, token) {
@@ -229,12 +242,12 @@ zenNodes.parser = {
   },
   
   'attributeValue': function (state, token, tokenIndex) {
-    state.current.setAttribute(zenNodes.func.lastToken(state.tokens, tokenIndex).value, token.value);
+    state.current.setAttribute(zenNodes.func.getLastToken(state.tokens, tokenIndex).value, token.value);
   },
   
   'class': function (state, token) {
     if (!state.current)
-      state.current = zenNodes.func.lastParent(state.parent).appendChild(document.createElement('div'));
+      state.current = zenNodes.func.getParent(state.parent).appendChild(document.createElement('div'));
     
     state.current.className += (state.current.className ? ' ' : '') + token.value;
   },
@@ -245,58 +258,64 @@ zenNodes.parser = {
   },
   
   'groupContents': function (state, token) {
-    zenNodes.func.lastParent(state.parent).appendChild(zenNodes(token.value));
+    zenNodes.func.getParent(state.parent).appendChild(zenNodes(token.value));
   },
   
   'id': function (state, token) {
     if (!state.current)
-      state.current = zenNodes.func.lastParent(state.parent).appendChild(document.createElement('div'));
+      state.current = zenNodes.func.getParent(state.parent).appendChild(document.createElement('div'));
     
     state.current.id = token.value;
   },
   
   'multiplier': function (state, token, tokenIndex) {
-    for (var current = null, node = state.current, i = 0, size = token.value - 1; i < size; i++) {
-      current = zenNodes.func.lastParent(state.parent).appendChild(node.cloneNode(true));
-      if (current.className.indexOf('$') > -1)
-        zenNodes.parser['multiplier'].replace(current, i);
-    }
-    
-    if (state.current.className.indexOf('$') > -1)
-      zenNodes.parser['multiplier'].replace(state.current, -1);
-    state.multiplier = true;
+    state.multiplier = 
+      zenNodes.func.getLastToken(state.tokens, tokenIndex).name == 'groupEnd'
+      ? zenNodes(zenNodes.func.getLastToken(state.tokens, tokenIndex, function (token) { return token.name == 'groupContents'; }).value)
+      : state.current;
   },
   
-  'placeholder': function (state, token) {
-    for (var parent = zenNodes.func.lastParent(state.parent), i = 0, size = parent.childNodes.length; i < size; i++)
-      parent.childNodes[i].className += token.value;
+  'placeholder': function (state, token, tokenIndex) {
+    var lastToken = zenNodes.func.getLastToken(state.tokens, tokenIndex, function (token) { return token.name == 'id' || token.name == 'class'; }),
+      parent = zenNodes.func.getParent(state.parent),
+      i = 0,
+      size = parent.childNodes.length;
+    for (; i < size; i++)
+      switch (lastToken.name) {
+        case 'class': parent.childNodes[i].className += token.value; break;
+        case 'id': parent.childNodes[i].id += token.value; break;
+      }
+  },
+  
+  'sibling': function (state, token) {
+    state.current = null;
   },
   
   'tag': function (state, token) {
-    if (state.multiplier) {
-      for (var parent = zenNodes.func.lastParent(state.parent, 2), i = 0, size = parent.childNodes.length; i < size; i++)
-        parent.childNodes[i].appendChild(document.createElement(token.value));
-    }
-    
-    else
-      state.current = zenNodes.func.lastParent(state.parent).appendChild(document.createElement(token.value));
-  },
-  
-  'text': function (state, token) {
-    if (!state.current)
-      state.current = zenNodes.func.lastParent(state.parent).appendChild(document.createElement('div'));
+    state.current = zenNodes.func.getParent(state.parent).appendChild(document.createElement(token.value));
   },
   
   'textContents': function (state, token) {
-    state.current.innerHTML = token.value;
+    var node = (state.current || zenNodes.func.getParent(state.parent));
+    if ('innerHTML' in node)
+      node.innerHTML += token.value;
   }
 };
 
-zenNodes.parser['multiplier'].replace = function (node, i) {
-  node.className = node.className.replace(/(\$+)/, function (match) {
-    return zenNodes.func.padding(i + 2, match.length, '0');
-  });
+zenNodes.parser['multiplier'].replace = function (node, num) {
+  for (var props = ['id', 'className'], i = 0, size = props.length; i < size; i++)
+    if (node[props[i]].indexOf('$') > -1)
+      node[props[i]] = node[props[i]].replace(/(\$+)/, function (match) {
+        return zenNodes.func.padding(num, match.length, '0');
+      });
 }
+
+zenNodes.parser['multiplier'].replaceAll = function (nodes, num) {
+  for (var i = 0, size = nodes.length; i < size; i++) {
+    zenNodes.parser['multiplier'].replace(nodes[i], (num !== undefined ? num : i) + 1);
+    zenNodes.parser['multiplier'].replaceAll(nodes[i].childNodes, (num !== undefined ? num : i));
+  }
+};
 
 ///////////////////////////////////////////////////////////////////////
 // Utility functions
@@ -329,23 +348,23 @@ zenNodes.func.fragment = function () {
   return document.createDocumentFragment();
 };
 
+zenNodes.func.getLastToken = function (tokens, tokenIndex, callback) {
+  if (callback !== undefined)
+    for (var i = tokenIndex, size = 0; i >= size; i--)
+      if (callback(tokens[i], i, tokens))
+        return tokens[i];
+  return tokens[(tokenIndex || tokens.length) - 1];
+};
+
+zenNodes.func.getParent = function (parents, num) {
+  return parents[parents.length - (num || 1)];
+};
+
 zenNodes.func.inList = function (list, value) {
   for (var i = 0, size = list.length; i < size; i++)
     if (list[i] == value)
       return true;
   return false;
-};
-
-zenNodes.func.lastParent = function (parents, num) {
-  return parents[parents.length - (num || 1)];
-};
-
-zenNodes.func.lastToken = function (tokens, tokenIndex, name) {
-  if (name !== undefined)
-    for (var i = tokenIndex, size = 0; i >= size; i--)
-      if (tokens[i].name == name)
-        return tokens[i];
-  return tokens[(tokenIndex || tokens.length) - 1];
 };
 
 zenNodes.func.padding = function (str, length, character) {
